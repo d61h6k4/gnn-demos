@@ -14,7 +14,7 @@
 # limitations under the License.
 """Datasets."""
 
-from typing import Tuple
+from typing import Tuple, Dict
 
 import collections
 import itertools
@@ -23,6 +23,16 @@ import numpy as np
 import networkx as nx
 
 from scipy import spatial
+from graph_nets import utils_np
+
+import tensorflow as tf
+import tensorflow_datasets.public_api as tfds
+
+_DESCRIPTION = """\
+The dataset to learn shortest path in graph.
+We follow the shortest path demo from
+https://github.com/deepmind/graph_nets
+"""
 
 DISTANCE_WEIGHT_NAME = "distance"    # The name for the distance edge attribute.
 
@@ -180,23 +190,17 @@ def graph_to_input_target(graph):
         return np.hstack(
             [np.array(attr[field], dtype=dtype) for field in fields])
 
-    input_node_fields = ("pos", "weight", "start", "end")
-    input_edge_fields = ("distance",)
-    target_node_fields = ("solution",)
-    target_edge_fields = ("solution",)
+    input_node_fields = ("pos", "weight", "start", "end", "solution")
+    input_edge_fields = ("distance", "solution")
 
     input_graph = graph.copy()
-    target_graph = graph.copy()
 
     solution_length = 0
     for node_index, node_feature in graph.nodes(data=True):
         input_graph.add_node(node_index,
                              features=create_feature(node_feature,
                                                      input_node_fields))
-        target_graph.add_node(node_index,
-                              features=create_feature(node_feature,
-                                                      target_node_fields,
-                                                      dtype=np.int32))
+
         solution_length += int(node_feature["solution"])
     solution_length /= graph.number_of_nodes()
 
@@ -205,13 +209,97 @@ def graph_to_input_target(graph):
                              receiver,
                              features=create_feature(features,
                                                      input_edge_fields))
-        target_graph.add_edge(sender,
-                              receiver,
-                              features=create_feature(features,
-                                                      target_edge_fields,
-                                                      dtype=np.int32))
+    input_graph.graph["features"] = np.array([solution_length], dtype=float)
 
-    input_graph.graph["features"] = np.array([0.0])
-    target_graph.graph["features"] = np.array([solution_length], dtype=float)
+    return input_graph
 
-    return input_graph, target_graph
+
+class ShortestPathDatasetConfig(tfds.core.BuilderConfig):
+    """Config of the dataset."""
+
+    def __init__(self, num_examples: int, min_num_nodes: int,
+                 max_num_nodes: int, dimensions: int, theta: float, rate: float,
+                 name: str, version: tfds.core.Version, description: str,
+                 **kwargs):
+        """Constructor."""
+        super().__init__(name=name,
+                         version=version,
+                         description=description,
+                         **kwargs)
+        self.num_examples = num_examples
+        self.min_num_nodes = min_num_nodes
+        self.max_num_nodes = max_num_nodes
+        self.dimensions = dimensions
+        self.theta = theta
+        self.rate = rate
+
+
+class ShortestPath(tfds.core.GeneratorBasedBuilder):
+    """The shortest path of graphs dataset."""
+
+    BUILDER_CONFIGS = [
+        ShortestPathDatasetConfig(num_examples=1000,
+                                  min_num_nodes=15,
+                                  max_num_nodes=17,
+                                  dimensions=2,
+                                  theta=40.,
+                                  rate=1.0,
+                                  name="default",
+                                  version=tfds.core.Version("0.1.0"),
+                                  description="The default config.")
+    ]
+
+    def _info(self) -> tfds.core.DatasetInfo:
+        """Describe the metainformation of the dataset."""
+        return tfds.core.DatasetInfo(
+            builder=self,
+            description=_DESCRIPTION,
+            features=tfds.features.FeaturesDict({
+                "graph":
+                    tfds.features.FeaturesDict({
+                        "nodes":
+                            tfds.features.Tensor(shape=(None, 6),
+                                                 dtype=tf.float32),
+                        "edges":
+                            tfds.features.Tensor(shape=(None, 2),
+                                                 dtype=tf.float32),
+                        "receivers":
+                            tfds.features.Tensor(shape=(None,), dtype=tf.int32),
+                        "senders":
+                            tfds.features.Tensor(shape=(None,), dtype=tf.int32),
+                        "globals":
+                            tfds.features.Tensor(shape=(1,), dtype=tf.float64),
+                        "n_node":
+                            tfds.features.Tensor(shape=(), dtype=tf.int32),
+                        "n_edge":
+                            tfds.features.Tensor(shape=(), dtype=tf.int32)
+                    }),
+            }))
+
+    def _split_generators(
+        self, dl_manager: tfds.download.DownloadManager
+    ) -> Dict[str, tfds.core.SplitGenerator]:
+        del dl_manager
+        return {
+            k[0]: self._generate_examples(
+                int(k[1] * self.builder_config.num_examples))
+            for k in [("train", 0.8), ("validation", 0.1), ("test", 0.1)]
+        }
+
+    def _generate_examples(self, num_examples: int) -> tfds.core.SplitGenerator:
+        rng = np.random.default_rng()
+        for i in range(num_examples):
+            graph, _, _ = generate_graph(
+                rand=rng,
+                min_num_nodes=self.builder_config.min_num_nodes,
+                max_num_nodes=self.builder_config.max_num_nodes,
+                dimensions=self.builder_config.dimensions,
+                theta=self.builder_config.theta,
+                rate=self.builder_config.rate)
+            graph = add_shortest_path(rng, graph)
+
+            yield i, {
+                "graph":
+                    utils_np.networkx_to_data_dict(graph_to_input_target(graph)
+                                                  ),
+            }

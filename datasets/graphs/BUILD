@@ -9,6 +9,8 @@ py_library(
         requirement("numpy"),
         requirement("networkx"),
         requirement("scipy"),
+        requirement("graph_nets"),
+        requirement("tensorflow"),
     ],
 )
 

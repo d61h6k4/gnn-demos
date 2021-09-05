@@ -15,27 +15,17 @@
 
 import unittest
 
-import numpy as np
-import datasets.graphs.shortest_path as spg
+import tensorflow_datasets as tfds
 
-from graph_nets import utils_np
+import projects.shortest_path.input_pipeline as input_pipeline
+import projects.shortest_path.train as train
 
 
-class TestGenerateGraph(unittest.TestCase):
+class TrainTest(unittest.TestCase):
 
     def setUp(self):
-        self.rand = np.random.default_rng()
-
-    def test_smoke(self):
-        graph, _, _ = spg.generate_graph(self.rand,
-                                         min_num_nodes=5,
-                                         max_num_nodes=10)
-        x, y = spg.graph_to_input_target(spg.add_shortest_path(
-            self.rand, graph))
-
-        xd = utils_np.networkx_to_data_dict(x)
-        yd = utils_np.networkx_to_data_dict(y)
-        self.assertTrue(xd["n_node"] == yd["n_node"])
+        dataset_builder = tfds.builder("shortest_path")
+        self.ds = input_pipeline.create_split(dataset_builder, True)
 
 
 if __name__ == "__main__":
