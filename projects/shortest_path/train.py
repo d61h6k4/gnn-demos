@@ -57,17 +57,21 @@ class ExplicitMLP(nn.Module):
         x = inputs
         for i, lyr in enumerate([nn.Dense(feat) for feat in self.features]):
             x = lyr(x)
+            x = nn.LayerNorm()(x)
             if i != len(self.features) - 1:
-                x = nn.relu(x)
+                x = nn.swish(x)
         return x
 
 
 # Functions must be passed to jraph GNNs, but pytype does not recognise
 # linen Modules as callables to here we wrap in a function.
-def make_embed_fn(latent_size):
+def make_embed_fn(latent_size, norm=True):
 
     def embed(inputs):
-        return nn.Dense(latent_size)(inputs)
+        x = nn.Dense(latent_size)(inputs)
+        if norm:
+            x = nn.LayerNorm()(x)
+        return x
 
     return embed
 
@@ -85,22 +89,37 @@ class GraphNetwork(nn.Module):
     """A flax GraphNetwork."""
     mlp_features: Sequence[int]
     latent_size: int
+    message_passing_num: int
 
     @nn.compact
     def __call__(self, graph):
-        # Add a global parameter for graph classification.
-        graph = graph._replace(globals=jnp.zeros([graph.n_node.shape[0], 1]))
 
-        embedder = jraph.GraphMapFeatures(
+        encoder = jraph.GraphMapFeatures(
             embed_node_fn=make_embed_fn(self.latent_size),
             embed_edge_fn=make_embed_fn(self.latent_size),
             embed_global_fn=make_embed_fn(self.latent_size))
-        net = jraph.GraphNetwork(
-            update_node_fn=make_mlp(self.mlp_features + (2,)),
-            update_edge_fn=make_mlp(self.mlp_features + (2,)),
+        core = jraph.GraphNetwork(
+            update_node_fn=make_mlp(self.mlp_features),
+            update_edge_fn=make_mlp(self.mlp_features),
         # The global update outputs size 2 for binary classification.
-            update_global_fn=make_mlp(self.mlp_features + (1,)))    # pytype: disable=unsupported-operands
-        return net(embedder(graph))
+            update_global_fn=make_mlp(self.mlp_features))    # pytype: disable=unsupported-operands
+        decoder = jraph.GraphMapFeatures(
+            embed_node_fn=make_embed_fn(self.latent_size),
+            embed_edge_fn=make_embed_fn(self.latent_size),
+            embed_global_fn=make_embed_fn(self.latent_size))
+
+        output_transform = jraph.GraphMapFeatures(
+            embed_node_fn=make_embed_fn(2, norm=False),
+            embed_edge_fn=make_embed_fn(2, norm=False),
+            embed_global_fn=make_embed_fn(1, norm=False))
+
+        graph = encoder(graph)
+
+        for _ in range(self.message_passing_num):
+            graph = decoder(core(graph))
+
+        graph = output_transform(graph)
+        return graph
 
 
 def initialized(key, model: nn.Module):
@@ -184,9 +203,12 @@ def cross_entropy_loss(logits, labels):
     return jnp.mean(xentropy)
 
 
-def compute_metrics(logits, labels):
-    loss = cross_entropy_loss(logits.nodes, labels)
-    accuracy = jnp.mean(jnp.argmax(logits.nodes, -1) == labels)
+def compute_metrics(logits, node_labels, edge_labels):
+    loss = cross_entropy_loss(logits.nodes, node_labels) + cross_entropy_loss(
+        logits.edges, edge_labels)
+
+    accuracy = (jnp.mean(jnp.argmax(logits.nodes, -1) == node_labels) +
+                jnp.mean(jnp.argmax(logits.nodes, -1) == node_labels)) / 2.0
     metrics = {
         'loss': loss,
         'accuracy': accuracy,
@@ -227,7 +249,7 @@ def train_step(state, batch, learning_rate_fn):
         # Re-use same axis_name as in the call to `pmap(...train_step...)` below.
         grads = lax.pmean(grads, axis_name='batch')
     logits = aux[1]
-    metrics = compute_metrics(logits, batch.node_labels)
+    metrics = compute_metrics(logits, batch.node_labels, batch.edge_labels)
     metrics['learning_rate'] = lr
 
     new_state = state.apply_gradients(grads=grads)
@@ -247,7 +269,7 @@ def train_step(state, batch, learning_rate_fn):
 def eval_step(state, batch):
     variables = {'params': state.params}
     preds = state.apply_fn(variables, batch.graph, mutable=False)
-    return compute_metrics(preds, batch.node_labels)
+    return compute_metrics(preds, batch.node_labels, batch.edge_labels)
 
 
 def train_and_evaluate(config: ml_collections.ConfigDict,
@@ -317,7 +339,9 @@ def train_and_evaluate(config: ml_collections.ConfigDict,
 
     base_learning_rate = config.learning_rate * config.batch_size / 256.
 
-    model = GraphNetwork(mlp_features=(128, 128), latent_size=128)
+    model = GraphNetwork(mlp_features=(16,),
+                         latent_size=16,
+                         message_passing_num=3)
 
     learning_rate_fn = create_learning_rate_fn(config, base_learning_rate,
                                                steps_per_epoch)

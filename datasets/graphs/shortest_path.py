@@ -246,6 +246,15 @@ class ShortestPath(tfds.core.GeneratorBasedBuilder):
                                   rate=1.0,
                                   name="default",
                                   version=tfds.core.Version("0.1.0"),
+                                  description="The default config."),
+        ShortestPathDatasetConfig(num_examples=1_000_000,
+                                  min_num_nodes=15,
+                                  max_num_nodes=17,
+                                  dimensions=2,
+                                  theta=40.,
+                                  rate=1.0,
+                                  name="large",
+                                  version=tfds.core.Version("0.1.0"),
                                   description="The default config.")
     ]
 

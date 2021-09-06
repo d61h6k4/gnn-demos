@@ -21,7 +21,7 @@ def get_config():
     """Get the default hyperparameter configuration."""
     config = ml_collections.ConfigDict()
 
-    config.dataset = "shortest_path"
+    config.dataset = "shortest_path/large"
     config.n_node_per_graph = 17
     config.n_edge_per_graph = 2 * 17
     config.cache = True
@@ -29,7 +29,7 @@ def get_config():
     config.num_epochs = 100
     config.num_train_steps = -1
     config.steps_per_eval = -1
-    config.learning_rate = 32e-2
+    config.learning_rate = 32e-3
     config.warmup_epochs = 10
     config.half_precision = False
     config.momentum = 0.99
