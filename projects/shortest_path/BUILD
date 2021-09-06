@@ -52,6 +52,21 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "eval",
+    srcs = ["eval.py"],
+    deps = [
+        ":input_pipeline",
+        ":train",
+        "//visualization/graphs:shortest_path",
+        requirement("absl_py"),
+        requirement("tensorflow"),
+        requirement("clu"),
+        requirement("jax"),
+        requirement("ml_collections"),
+    ],
+)
+
 py_test(
     name = "input_pipeline_test",
     srcs = ["input_pipeline_test.py"],
