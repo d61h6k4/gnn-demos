@@ -72,6 +72,6 @@ Werkzeug==2.0.1
 wrapt==1.12.1
 yapf==0.31.0
 wheel==0.37.0
-setuptools==57.4.0
+setuptools==65.5.1
 python-version==0.0.2
 jraph @ git+git://github.com/deepmind/jraph.git@88b962a1be3c93173247becf9814fa513ab87912
