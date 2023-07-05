@@ -22,7 +22,7 @@ google-pasta==0.2.0
 googleapis-common-protos==1.53.0
 graph-nets==1.1.0
 greenlet==1.1.1
-grpcio==1.39.0
+grpcio==1.53.0
 h5py==3.1.0
 idna==3.2
 --find-links https://storage.googleapis.com/jax-releases/jax_releases.html
